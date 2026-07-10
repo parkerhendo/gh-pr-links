@@ -1,9 +1,10 @@
 # gh-pr-links
 
-A [GitHub CLI](https://cli.github.com) extension that lists every link found
+A [GitHub CLI](https://cli.github.com) extension that lists the links found
 in the comments on the current branch's pull request — deploy previews
 (Vercel, Netlify, Cloudflare, Railway, ...), CI logs, docs, whatever — and
-lets you pick one to open in your browser.
+lets you pick one to open in your browser. Links are collapsed to their
+host (no paths or query params) and deduped.
 
 ## Installation
 
@@ -28,10 +29,8 @@ gh pr-links --print   # print URLs only, no prompt
 Example:
 
 ```
- 1) https://myapp-git-my-branch.vercel.app
- 2) https://vercel.com/me/myapp/DKxYn8oVaB
- 3) https://myapp-pr-42.up.railway.app
+1. myapp-git-my-branch.vercel.app
+2. vercel.com
+3. myapp-pr-42.up.railway.app
 Open which? [1-3, Enter to skip]
 ```
-
-Image embeds are skipped, and duplicate URLs are deduped.

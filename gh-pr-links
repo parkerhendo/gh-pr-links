@@ -46,24 +46,25 @@ open_url() {
 pr_number=$(gh pr view --json number --jq .number 2>/dev/null) ||
   die "no pull request found for the current branch"
 
-# Extract URLs from every comment: drop image embeds, grab http(s) URLs
-# (the regex stops before `)`, so markdown link targets come out clean),
-# strip trailing punctuation, dedupe preserving order.
+# Extract link roots (scheme + host) from every comment: drop image
+# embeds, grab http(s) origins, dedupe preserving order.
 urls=$(gh api "repos/{owner}/{repo}/issues/${pr_number}/comments" --paginate --jq '.[].body' |
   sed 's/!\[[^][]*\]([^)]*)//g' |
-  grep -oE "https?://[^[:space:]<>\"'\`)]+" |
+  grep -oE "https?://[^][/[:space:]<>\"'\`)?#]+" |
   sed 's/[.,;:]$//' |
   awk '!seen[$0]++' || true)
 
 [ -n "$urls" ] || die "no links found in comments on PR #${pr_number}"
 
+hosts=$(sed 's|^https\{0,1\}://||' <<<"$urls")
+
 if [ -n "$print_only" ] || ! { [ -t 0 ] && [ -t 1 ]; }; then
-  printf '%s\n' "$urls"
+  printf '%s\n' "$hosts"
   exit 0
 fi
 
 count=$(wc -l <<<"$urls" | tr -d ' ')
-nl -w2 -s') ' <<<"$urls"
+nl -w1 -s'. ' <<<"$hosts"
 printf 'Open which? [1-%s, Enter to skip] ' "$count"
 read -r choice
 [ -n "$choice" ] || exit 0
