@@ -1,0 +1,109 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+usage() {
+  cat <<'EOF'
+List every link found in the current branch's PR comments and optionally
+open one in your browser.
+
+USAGE
+  gh pr-links [flags]
+
+FLAGS
+  -p, --print     Print the URLs only (no prompt)
+  -h, --help      Show this help
+
+Links are listed newest-comment-first per commenter, with the link text
+and comment author for context. Press Enter at the prompt to exit
+without opening anything.
+EOF
+}
+
+die() {
+  echo "gh pr-links: $*" >&2
+  exit 1
+}
+
+print_only=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    -p|--print) print_only=1 ;;
+    -h|--help) usage; exit 0 ;;
+    *) die "unknown argument: $1 (see gh pr-links --help)" ;;
+  esac
+  shift
+done
+
+command -v jq >/dev/null 2>&1 || die "jq is required but not installed"
+
+open_url() {
+  local url="$1"
+  echo "Opening $url"
+  case "$(uname -s)" in
+    Darwin) open "$url" ;;
+    Linux) xdg-open "$url" >/dev/null 2>&1 ;;
+    MINGW*|MSYS*|CYGWIN*) start "$url" ;;
+    *) die "don't know how to open a browser on this OS; URL: $url" ;;
+  esac
+}
+
+emit() {
+  jq -cn --arg a "$1" --arg t "$2" --arg u "$3" '{author: $a, text: $t, url: $u}'
+}
+
+# --- Resolve the current branch's PR ---
+pr_number=$(gh pr view --json number --jq .number 2>/dev/null) ||
+  die "no pull request found for the current branch"
+
+comments=$(gh api "repos/{owner}/{repo}/issues/${pr_number}/comments" --paginate \
+  --jq '.[] | {login: .user.login, body: .body}' | jq -s '.')
+
+# --- Extract links from every comment ---
+entries=""
+while IFS= read -r comment; do
+  login=$(jq -r .login <<<"$comment")
+  # Drop image embeds; their URLs aren't worth opening.
+  body=$(jq -r .body <<<"$comment" | sed 's/!\[[^][]*\]([^)]*)//g')
+
+  # Markdown links: [text](url)
+  while IFS= read -r link; do
+    [ -n "$link" ] || continue
+    text="${link#[}"; text="${text%%]*}"
+    url="${link##*(}"; url="${url%)}"
+    entries+=$(emit "$login" "$text" "$url")$'\n'
+  done < <(grep -oE '\[[^][]*\]\(https?://[^)]+\)' <<<"$body" || true)
+
+  # Bare URLs (with markdown links removed to avoid double-counting)
+  while IFS= read -r url; do
+    [ -n "$url" ] || continue
+    entries+=$(emit "$login" "" "$url")$'\n'
+  done < <(sed 's/\[[^][]*\]([^)]*)//g' <<<"$body" |
+    grep -oE "https?://[^[:space:]<>\"'\`)]+" | sed 's/[.,;:]$//' || true)
+done < <(jq -c '.[]' <<<"$comments")
+
+# Dedupe by URL, keeping the first occurrence (which has the richer label).
+links=$(printf '%s' "$entries" | jq -cs '
+  reduce .[] as $x ([]; if any(.[]; .url == $x.url) then . else . + [$x] end)')
+
+count=$(jq 'length' <<<"$links")
+[ "$count" -gt 0 ] || die "no links found in comments on PR #${pr_number}"
+
+if [ -n "$print_only" ]; then
+  jq -r '.[].url' <<<"$links"
+  exit 0
+fi
+
+echo "Links in comments on PR #${pr_number}:"
+jq -r 'to_entries[] | "\(.key + 1))\t\(if .value.text != "" and .value.text != .value.url then .value.text else "-" end) (\(.value.author))\t\(.value.url)"' <<<"$links" |
+  column -t -s$'\t'
+
+if [ -t 0 ] && [ -t 1 ]; then
+  printf 'Open which? [1-%s, Enter to skip] ' "$count"
+  read -r choice
+  [ -n "$choice" ] || exit 0
+  case "$choice" in
+    *[!0-9]*) die "invalid selection" ;;
+  esac
+  [ "$choice" -ge 1 ] && [ "$choice" -le "$count" ] || die "invalid selection"
+  open_url "$(jq -r --argjson i "$((choice - 1))" '.[$i].url' <<<"$links")"
+fi
