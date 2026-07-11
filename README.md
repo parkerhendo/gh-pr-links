@@ -24,6 +24,7 @@ gh extension install .
 ```sh
 gh pr-links           # list links, pick one to open (Enter to skip)
 gh pr-links --print   # print URLs only, no prompt
+gh pr-links <pr-url>  # use a specific PR instead of the current branch's
 ```
 
 Example:

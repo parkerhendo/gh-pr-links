@@ -7,7 +7,11 @@ List the links found in the current branch's PR comments and optionally
 open one in your browser.
 
 USAGE
-  gh pr-links [flags]
+  gh pr-links [<pr-url>] [flags]
+
+ARGUMENTS
+  <pr-url>        A pull request URL (or number) to use instead of the
+                  current branch's PR
 
 FLAGS
   -p, --print     Print the URLs only (no prompt)
@@ -23,11 +27,16 @@ die() {
 }
 
 print_only=""
+pr_arg=""
 while [ $# -gt 0 ]; do
   case "$1" in
     -p|--print) print_only=1 ;;
     -h|--help) usage; exit 0 ;;
-    *) die "unknown argument: $1 (see gh pr-links --help)" ;;
+    -*) die "unknown argument: $1 (see gh pr-links --help)" ;;
+    *)
+      [ -z "$pr_arg" ] || die "unexpected argument: $1 (see gh pr-links --help)"
+      pr_arg="$1"
+      ;;
   esac
   shift
 done
@@ -43,12 +52,19 @@ open_url() {
   esac
 }
 
-pr_number=$(gh pr view --json number --jq .number 2>/dev/null) ||
-  die "no pull request found for the current branch"
+if [ -n "$pr_arg" ]; then
+  pr_info=$(gh pr view "$pr_arg" --json number,url 2>/dev/null) ||
+    die "no pull request found for: $pr_arg"
+else
+  pr_info=$(gh pr view --json number,url 2>/dev/null) ||
+    die "no pull request found for the current branch"
+fi
+pr_number=$(jq -r .number <<<"$pr_info")
+repo_path=$(jq -r .url <<<"$pr_info" | sed -E 's|^https?://[^/]+/([^/]+/[^/]+)/pull/.*|\1|')
 
 # Extract link roots (scheme + host) from every comment: drop image
 # embeds, grab http(s) origins, dedupe preserving order.
-urls=$(gh api "repos/{owner}/{repo}/issues/${pr_number}/comments" --paginate --jq '.[].body' |
+urls=$(gh api "repos/${repo_path}/issues/${pr_number}/comments" --paginate --jq '.[].body' |
   sed 's/!\[[^][]*\]([^)]*)//g' |
   grep -oE "https?://[^][/[:space:]<>\"'\`)?#]+" |
   sed 's/[.,;:]$//' |
